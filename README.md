@@ -136,6 +136,10 @@ On Windows, the bridge observes Codex/ChatGPT/Claude process names and local ses
 
 The firmware starts with the bridge host compiled into it, then can discover and save another bridge on the same LAN. Runtime state, alerts, recording transcription, and paste injection use Wi-Fi.
 
+### Optional Android Companion
+
+The LAN-only Android companion lives in [`app/android`](app/android/README.md). It discovers Windows bridges automatically, records phone microphone audio for PC-side transcription, sends typed text plus Enter to the focused PC input, and shows Codex task completion or failure alerts.
+
 ### Multiple Computers
 
 When several computers on the same LAN are running VibeStick Bridge, long-press the StickS3 side button to search. Short-press the side button to move down the list, then press the front blue button to select a computer. The StickS3 saves the selected bridge host and keeps using Wi-Fi for all runtime traffic.
@@ -267,6 +271,7 @@ VibeStick/
   docs/
   firmware/sticks3/
   bridge/src/vibe_stick/
+  app/android/
   app/macos/VibeStickHUD/
   scripts/
   tests/

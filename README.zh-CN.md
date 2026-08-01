@@ -134,6 +134,10 @@ Windows bridge 会读取 Codex/ChatGPT/Claude 的 Windows 进程名和本地 ses
 
 固件首次使用烧录时写入的 bridge host，之后可以搜索并保存同一局域网里的其他 bridge。运行时状态、提醒、录音转写和粘贴都走 Wi-Fi。
 
+### 可选：Android 手机端
+
+纯局域网 Android 手机端位于 [`app/android`](app/android/README.md)。它会自动发现 Windows bridge，可用手机麦克风录音并交给电脑端转写，也可把手动输入的文字连同 Enter 发送到电脑当前聚焦输入框，并接收 Codex 任务完成或失败提醒。
+
 ### 多电脑切换
 
 如果同一局域网里有多台电脑运行 VibeStick Bridge，长按 StickS3 右侧键进入搜索。短按右侧键向下选择，按正面蓝键确认连接这台电脑。StickS3 会保存选中的 bridge host，之后运行时通信仍全部走 Wi-Fi。
@@ -265,6 +269,7 @@ VibeStick/
   docs/
   firmware/sticks3/
   bridge/src/vibe_stick/
+  app/android/
   app/macos/VibeStickHUD/
   scripts/
   tests/
