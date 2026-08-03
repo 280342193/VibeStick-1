@@ -23,7 +23,7 @@ The bridge responds to the sender:
 {"type":"vibestick_bridge","name":"Desk PC","port":8765,"version":"0.1.5"}
 ```
 
-The StickS3 uses the response sender IP as the bridge host. If the bridge has no configured token, it remembers the token from discovery for later HTTP requests.
+The client uses the response sender IP as the bridge host. If the bridge has no configured token, it remembers each distinct device token from discovery for later HTTP requests. Pairing a phone does not replace a StickS3 or another phone's token.
 
 ## Firmware Headers
 
@@ -50,7 +50,7 @@ When `VIBE_STICK_BRIDGE_TOKEN` is configured on the bridge and firmware, protect
 X-Vibe-Stick-Token: <shared-token>
 ```
 
-Protected endpoints are `/event`, `/quota/refresh`, `/recording/start`, `/recording/audio`, and `/recording/stop`. When the bridge has a configured or discovery-paired token, POST requests must include it. If no token is available yet, the personal-LAN bridge accepts requests so first-time Wi-Fi pairing stays simple.
+Protected endpoints are `/event`, `/input/text`, `/quota/refresh`, `/recording/start`, `/recording/audio`, `/recording/complete`, and `/recording/stop`. When the bridge has a configured or discovery-paired token, POST requests must include it. If no token is available yet, the personal-LAN bridge accepts requests so first-time Wi-Fi pairing stays simple.
 
 ## GET /state
 
@@ -124,6 +124,16 @@ Examples:
 
 Manual `DONE`, `ERROR`, and `APPROVAL` statuses produce alert fields for local testing.
 
+## POST /input/text
+
+Pastes text into the focused desktop input and optionally submits it in one request:
+
+```json
+{"text":"run tests","submit":true,"source":"android"}
+```
+
+The response contains an `input.status` of `sent`, `pasted`, `paste_failed`, or `validation_failed`.
+
 ## POST /quota/refresh
 
 Requests a quota refresh for the active provider. Codex refreshes from local session events. Claude refreshes the cached usage snapshot only when `VIBE_STICK_CLAUDE_USAGE` is enabled; failures keep the provider quota fields `null` so the firmware shows `--%`.
@@ -168,6 +178,17 @@ The bridge writes a local WAV file under:
 ```
 
 The bridge rejects audio uploads larger than `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`. The default is `2000000` bytes.
+
+## POST /recording/complete
+
+Android can upload raw PCM and run the complete start, transcription, and paste flow in one request:
+
+```text
+POST /recording/complete?session_id=<id>
+Content-Type: application/octet-stream
+```
+
+It uses the same audio headers, size limit, recording response, and PC-side ASR path as the three-request recording flow. Clients may fall back to `/recording/start`, `/recording/audio`, and `/recording/stop` when an older bridge returns `404`.
 
 ## POST /recording/stop
 

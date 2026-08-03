@@ -136,6 +136,10 @@ On Windows, the bridge observes Codex/ChatGPT/Claude process names and local ses
 
 The firmware starts with the bridge host compiled into it, then can discover and save another bridge on the same LAN. Runtime state, alerts, recording transcription, and paste injection use Wi-Fi.
 
+### Optional Android Companion
+
+The LAN-only Android companion lives in [`app/android`](app/android/README.md). It discovers Windows bridges automatically, records phone microphone audio for PC-side transcription, sends typed text plus Enter to the focused PC input, and shows Codex task completion or failure alerts.
+
 ### Multiple Computers
 
 When several computers on the same LAN are running VibeStick Bridge, long-press the StickS3 side button to search. Short-press the side button to move down the list, then press the front blue button to select a computer. The StickS3 saves the selected bridge host and keeps using Wi-Fi for all runtime traffic.
@@ -200,7 +204,7 @@ Empty values in `.env` generally mean "use the built-in default". `scripts/dev.s
 - `VIBE_STICK_COMPUTER_NAME`: optional computer-name override shown on the StickS3 home screen.
 - `VIBE_STICK_PROVIDER`: active provider selection, `auto`, `codex`, or `claude`; default `auto`.
 - `VIBE_STICK_BRIDGE_TOKEN`: shared token required whenever the bridge binds outside loopback, such as `0.0.0.0`.
-- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`: max `/recording/audio` body size, default `2000000`.
+- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`: max `/recording/audio` or `/recording/complete` body size, default `2000000`.
 - `VIBE_STICK_RECORDING_USE_MAC_MIC`: set to `0` to disable Mac microphone fallback.
 - `VIBE_STICK_AUTO_ENTER`: set to `1` to press Return after pasting.
 
@@ -267,6 +271,7 @@ VibeStick/
   docs/
   firmware/sticks3/
   bridge/src/vibe_stick/
+  app/android/
   app/macos/VibeStickHUD/
   scripts/
   tests/

@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
-from vibe_stick.protocol.state import AgentStatus, ProviderState, default_state
+from vibe_stick.protocol.state import AlertState, AlertType, AgentStatus, ProviderState, default_state
 from vibe_stick.codex.quota import QuotaSnapshot
 from vibe_stick.providers.base import ProviderObservation
 from vibe_stick.server import app
@@ -100,6 +100,22 @@ class ServerProviderTests(unittest.TestCase):
         selected = app._select_alert_observation(active, codex, active)
 
         self.assertIs(selected, active)
+
+    def test_empty_idle_observation_does_not_erase_pending_terminal_alert(self) -> None:
+        store = app.BridgeStateStore.__new__(app.BridgeStateStore)
+        store._state = default_state()
+        store._state.alert = AlertState(
+            event_id="evt_codex_done",
+            type=AlertType.DONE,
+            message="Codex task completed",
+        )
+
+        store._apply_alert_from_observation(
+            self._obs("codex", status=AgentStatus.IDLE)
+        )
+
+        self.assertEqual(store._state.alert.event_id, "evt_codex_done")
+        self.assertEqual(store._state.alert.type, AlertType.DONE)
 
     def test_running_provider_disappearance_becomes_error_alert(self) -> None:
         store = app.BridgeStateStore.__new__(app.BridgeStateStore)

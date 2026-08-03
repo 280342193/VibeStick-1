@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.13
+
+- Keep separate discovery-paired tokens for StickS3 and multiple Android devices, and verify protected access before Android reports a connection.
+- Add single-request Android text and voice endpoints, cache provider observations, and retry transient Windows clipboard writes to reduce latency and send failures.
+- Preserve terminal task alerts until Android delivers them, including alerts already pending on the first successful connection.
+
 ## v0.1.12
 
 - Improve Windows Codex/ChatGPT/Claude detection and preserve recent task status and alert events even when an agent process exits before the next poll.

@@ -143,22 +143,29 @@ class WindowsPasteInjector(PasteInjector):
             "-Command",
             "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
         ]
-        try:
-            result = subprocess.run(
-                command,
-                input=text,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                **hidden_subprocess_kwargs(),
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            return PasteResult(False, f"Clipboard write failed: {exc}")
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or "Clipboard write failed").strip()
-            return PasteResult(False, message)
-        return PasteResult(True, "Clipboard updated")
+        last_message = "Clipboard write failed"
+        for attempt in range(3):
+            try:
+                result = subprocess.run(
+                    command,
+                    input=text,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    **hidden_subprocess_kwargs(),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                last_message = f"Clipboard write failed: {exc}"
+            else:
+                if result.returncode == 0:
+                    return PasteResult(True, "Clipboard updated")
+                last_message = (
+                    result.stderr or result.stdout or "Clipboard write failed"
+                ).strip()
+            if attempt < 2:
+                time.sleep(0.05 * (attempt + 1))
+        return PasteResult(False, last_message)
 
     def _send_ctrl_v(self, *, press_enter: bool) -> None:
         import ctypes
