@@ -52,6 +52,7 @@ BRIDGE_NAME = "vibestick-bridge"
 DEFAULT_MAX_RECORDING_AUDIO_BYTES = 2_000_000
 DEFAULT_CLAUDE_USAGE_INTERVAL_SECONDS = 300
 MIN_CLAUDE_USAGE_INTERVAL_SECONDS = 30
+PROVIDER_REFRESH_INTERVAL_SECONDS = 5.0
 DISCOVERY_PORT = 8766
 DISCOVERY_PACKET_BYTES = 2048
 PLACEHOLDER_BRIDGE_TOKENS = {
@@ -66,6 +67,7 @@ class BridgeStateStore:
     def __init__(self) -> None:
         ensure_app_support()
         self._lock = threading.RLock()
+        self._operation_lock = threading.Lock()
         self._project_root = _resolve_project_root()
         self._manual_status_until = 0.0
         self._state = self._load_state()
@@ -76,6 +78,7 @@ class BridgeStateStore:
             self._claude_quota = _claude_quota_from_state(self._state)
         self._claude_usage_last_attempt = 0.0
         self._claude_usage_last_success = 0.0
+        self._last_provider_refresh_monotonic = 0.0
         quota = load_quota(QUOTA_PATH)
         self._state.codex.quota_5h_remaining = quota.quota_5h_remaining
         self._state.codex.quota_7d_remaining = quota.quota_7d_remaining
@@ -84,34 +87,72 @@ class BridgeStateStore:
         self.recording = RecordingController(RECORDING_PATH)
         hide_hud()
 
-    def get_state(self) -> VibeStickState:
+    def get_state(self, *, refresh_providers: bool = True) -> VibeStickState:
         with self._lock:
-            self._refresh_providers_locked()
+            now = time.monotonic()
+            if (
+                refresh_providers
+                and now - self._last_provider_refresh_monotonic >= PROVIDER_REFRESH_INTERVAL_SECONDS
+            ):
+                self._refresh_providers_locked()
+                self._last_provider_refresh_monotonic = now
             self._state.time = now_time_text()
             self._state.computer_name = _computer_name()
             self._save_state_locked()
             return self._state
 
     def update_from_event(self, event: dict[str, Any]) -> VibeStickState:
-        with self._lock:
-            event_name = str(event.get("event") or "")
-            requested_status = event.get("codex_status") or event.get("status")
-            if requested_status:
-                self._set_codex_status(str(requested_status), str(event.get("message") or ""))
-                self._manual_status_until = time.monotonic() + MANUAL_STATUS_SECONDS
-            elif event_name == "button_double":
-                self.refresh_quota_locked()
-            elif event_name == "button_short":
-                self._state.alert = AlertState(event_id="", type=AlertType.NONE, message="")
+        event_name = str(event.get("event") or "")
+        if event_name == "button_short":
+            with self._operation_lock:
                 enter_result = make_paste_injector().press_enter()
+            with self._lock:
+                self._state.alert = AlertState(event_id="", type=AlertType.NONE, message="")
                 if not enter_result.success:
                     self._state.alert = AlertState(
                         event_id("error"),
                         AlertType.ERROR,
                         enter_result.message or "Enter injection failed",
                     )
+                self._save_state_locked()
+                return self._state
+
+        with self._lock:
+            requested_status = event.get("codex_status") or event.get("status")
+            if requested_status:
+                self._set_codex_status(str(requested_status), str(event.get("message") or ""))
+                self._manual_status_until = time.monotonic() + MANUAL_STATUS_SECONDS
+            elif event_name == "button_double":
+                self.refresh_quota_locked()
             self._save_state_locked()
             return self._state
+
+    def send_text_input(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
+        with self._operation_lock:
+            request = request or {}
+            text = str(request.get("text") or "").strip()
+            submit = bool(request.get("submit", True))
+            if not text:
+                result = {
+                    "status": "validation_failed",
+                    "pasted": False,
+                    "submitted": False,
+                    "message": "No text to paste",
+                }
+            else:
+                paste_result = make_paste_injector().paste(text, press_enter=submit)
+                result = {
+                    "status": "sent" if paste_result.success and submit else (
+                        "pasted" if paste_result.success else "paste_failed"
+                    ),
+                    "pasted": paste_result.success,
+                    "submitted": paste_result.success and submit,
+                    "message": paste_result.message,
+                }
+            return {
+                "input": result,
+                "state": self.get_state(refresh_providers=False).to_jsonable(),
+            }
 
     def refresh_quota(self) -> VibeStickState:
         with self._lock:
@@ -134,19 +175,20 @@ class BridgeStateStore:
             self._state.provider = _provider_state_from_observation(codex_observation)
 
     def start_recording(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
-        session = self.recording.start(request)
-        with self._lock:
-            self._state.alert = AlertState(
-                event_id="",
-                type=AlertType.NONE,
-                message="",
-            )
-            self._save_state_locked()
-        return {"recording": session.to_jsonable(), "state": self.get_state().to_jsonable()}
+        with self._operation_lock:
+            session = self.recording.start(request)
+            return {
+                "recording": session.to_jsonable(),
+                "state": self.get_state(refresh_providers=False).to_jsonable(),
+            }
 
     def stop_recording(self, request: dict[str, Any] | None = None) -> dict[str, Any]:
-        session = self.recording.stop(request)
-        return {"recording": session.to_jsonable(), "state": self.get_state().to_jsonable()}
+        with self._operation_lock:
+            session = self.recording.stop(request)
+            return {
+                "recording": session.to_jsonable(),
+                "state": self.get_state(refresh_providers=False).to_jsonable(),
+            }
 
     def upload_recording_audio(
         self,
@@ -157,14 +199,46 @@ class BridgeStateStore:
         channels: int = 1,
         bits_per_sample: int = 16,
     ) -> dict[str, Any]:
-        session = self.recording.attach_pcm(
-            pcm,
-            session_id=session_id,
-            sample_rate=sample_rate,
-            channels=channels,
-            bits_per_sample=bits_per_sample,
-        )
-        return {"recording": session.to_jsonable(), "state": self.get_state().to_jsonable()}
+        with self._operation_lock:
+            session = self.recording.attach_pcm(
+                pcm,
+                session_id=session_id,
+                sample_rate=sample_rate,
+                channels=channels,
+                bits_per_sample=bits_per_sample,
+            )
+            return {
+                "recording": session.to_jsonable(),
+                "state": self.get_state(refresh_providers=False).to_jsonable(),
+            }
+
+    def complete_recording(
+        self,
+        pcm: bytes,
+        *,
+        session_id: str = "",
+        sample_rate: int = 16000,
+        channels: int = 1,
+        bits_per_sample: int = 16,
+    ) -> dict[str, Any]:
+        with self._operation_lock:
+            session = self.recording.start(
+                {"session_id": session_id, "audio_source": "sticks3_android"}
+            )
+            if session.status == "recording":
+                session = self.recording.attach_pcm(
+                    pcm,
+                    session_id=session_id,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    bits_per_sample=bits_per_sample,
+                )
+            if session.status == "recording":
+                session = self.recording.stop({"paste": True})
+            return {
+                "recording": session.to_jsonable(),
+                "state": self.get_state(refresh_providers=False).to_jsonable(),
+            }
 
     def _refresh_providers_locked(self) -> None:
         codex_observation = observe_codex(self._project_root)
@@ -222,7 +296,7 @@ class BridgeStateStore:
                 type=alert_type,
                 message=observation.alert_message,
             )
-        else:
+        elif observation.status == AgentStatus.RUNNING:
             self._state.alert = AlertState(event_id="", type=AlertType.NONE, message="")
 
     def _apply_codex_quota(self, observation: ProviderObservation, *, force_stale: bool = False) -> None:
@@ -353,6 +427,9 @@ def make_handler(store: BridgeStateStore) -> type[BaseHTTPRequestHandler]:
             elif parsed.path == "/quota/refresh":
                 state = store.refresh_quota()
                 self._send_json({"refreshed": True, "state": state.to_jsonable()})
+            elif parsed.path == "/input/text":
+                body = self._read_json_body()
+                self._send_json(store.send_text_input(body))
             elif parsed.path == "/recording/start":
                 body = self._read_json_body()
                 self._send_json(store.start_recording(body))
@@ -369,6 +446,26 @@ def make_handler(store: BridgeStateStore) -> type[BaseHTTPRequestHandler]:
                 pcm = self._read_raw_body(content_length)
                 self._send_json(
                     store.upload_recording_audio(
+                        pcm,
+                        session_id=_first(query, "session_id"),
+                        sample_rate=_int_header(self.headers.get("X-Vibe-Stick-Sample-Rate"), 16000),
+                        channels=_int_header(self.headers.get("X-Vibe-Stick-Channels"), 1),
+                        bits_per_sample=_int_header(self.headers.get("X-Vibe-Stick-Bits-Per-Sample"), 16),
+                    )
+                )
+            elif parsed.path == "/recording/complete":
+                query = parse_qs(parsed.query)
+                content_length = self._content_length()
+                max_audio_bytes = _max_recording_audio_bytes()
+                if content_length > max_audio_bytes:
+                    self._send_error(
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                        f"Recording audio exceeds {max_audio_bytes} bytes",
+                    )
+                    return
+                pcm = self._read_raw_body(content_length)
+                self._send_json(
+                    store.complete_recording(
                         pcm,
                         session_id=_first(query, "session_id"),
                         sample_rate=_int_header(self.headers.get("X-Vibe-Stick-Sample-Rate"), 16000),
@@ -416,11 +513,11 @@ def make_handler(store: BridgeStateStore) -> type[BaseHTTPRequestHandler]:
             return max(0, length)
 
         def _is_authorized(self) -> bool:
-            expected = _bridge_token()
-            if not expected:
+            expected_tokens = _bridge_tokens()
+            if not expected_tokens:
                 return True
             supplied = self.headers.get("X-Vibe-Stick-Token", "")
-            return hmac.compare_digest(supplied, expected)
+            return any(hmac.compare_digest(supplied, expected) for expected in expected_tokens)
 
         def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -454,15 +551,25 @@ def run_server(host: str, port: int) -> None:
 def _protected_paths() -> set[str]:
     return {
         "/event",
+        "/input/text",
         "/quota/refresh",
         "/recording/start",
         "/recording/audio",
+        "/recording/complete",
         "/recording/stop",
     }
 
 
 def _bridge_token() -> str:
-    return _configured_bridge_token() or _paired_bridge_token()
+    tokens = _bridge_tokens()
+    return tokens[0] if tokens else ""
+
+
+def _bridge_tokens() -> tuple[str, ...]:
+    configured = _configured_bridge_token()
+    if configured:
+        return (configured,)
+    return _paired_bridge_tokens()
 
 
 def _configured_bridge_token() -> str:
@@ -478,11 +585,20 @@ def _enforce_bind_security(host: str) -> None:
 
 
 def _paired_bridge_token() -> str:
+    tokens = _paired_bridge_tokens()
+    return tokens[0] if tokens else ""
+
+
+def _paired_bridge_tokens() -> tuple[str, ...]:
     try:
-        token = PAIRED_TOKEN_PATH.read_text().strip()
+        saved_tokens = PAIRED_TOKEN_PATH.read_text().splitlines()
     except OSError:
-        return ""
-    return "" if token.lower() in PLACEHOLDER_BRIDGE_TOKENS else token
+        return ()
+    return tuple(dict.fromkeys(
+        token
+        for raw in saved_tokens
+        if (token := raw.strip()) and token.lower() not in PLACEHOLDER_BRIDGE_TOKENS
+    ))
 
 
 def _remember_pairing_token(token: str) -> None:
@@ -493,7 +609,13 @@ def _remember_pairing_token(token: str) -> None:
         return
     try:
         PAIRED_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        PAIRED_TOKEN_PATH.write_text(token + "\n")
+        existing = [
+            saved.strip()
+            for saved in PAIRED_TOKEN_PATH.read_text().splitlines()
+            if saved.strip()
+        ] if PAIRED_TOKEN_PATH.exists() else []
+        if token not in existing:
+            PAIRED_TOKEN_PATH.write_text("\n".join([*existing, token]) + "\n")
     except OSError as exc:
         print(f"discovery token save failed: {exc}", flush=True)
 

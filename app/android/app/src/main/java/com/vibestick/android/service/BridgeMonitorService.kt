@@ -9,7 +9,6 @@ import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.vibestick.android.VibeStickApplication
-import com.vibestick.android.data.AlertDeduplicator
 import com.vibestick.android.data.BridgeCallResult
 import com.vibestick.android.data.BridgeFailure
 import com.vibestick.android.data.ConnectionState
@@ -68,8 +67,7 @@ class BridgeMonitorService : Service() {
 
     private suspend fun monitorBridge() {
         val store = app.connectionStore
-        val deduplicator = AlertDeduplicator(store.lastAlertEventId())
-        var seededFirstConnection = false
+        val alertPolicy = BridgeMonitorAlertPolicy(store.lastAlertEventId())
         var networkFailures = 0
 
         while (currentCoroutineContext().isActive) {
@@ -79,18 +77,12 @@ class BridgeMonitorService : Service() {
                     val state = result.value
                     showForegroundNotification(state.computerName)
                     val alert = state.alert
-                    if (!seededFirstConnection) {
-                        deduplicator.seed(alert)
-                        if (alert.eventId.isNotBlank()) {
-                            store.saveLastAlertEventId(alert.eventId)
-                        }
-                        seededFirstConnection = true
-                    } else if (deduplicator.shouldNotify(alert)) {
+                    if (alertPolicy.shouldNotify(alert)) {
                         if (app.notificationFactory.showTaskAlert(alert)) {
-                            deduplicator.markDelivered(alert)
+                            alertPolicy.markDelivered(alert)
                             store.saveLastAlertEventId(alert.eventId)
                         } else {
-                            deduplicator.markDeliveryFailed(alert)
+                            alertPolicy.markDeliveryFailed(alert)
                         }
                     }
                     delay(connectedPollMillis)

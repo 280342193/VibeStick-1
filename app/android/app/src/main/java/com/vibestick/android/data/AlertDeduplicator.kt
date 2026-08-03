@@ -6,13 +6,6 @@ class AlertDeduplicator(lastDeliveredEventId: String) {
 
     private var pendingEventId: String = ""
 
-    fun seed(alert: Alert) {
-        pendingEventId = ""
-        if (alert.eventId.isNotBlank()) {
-            deliveredEventId = alert.eventId
-        }
-    }
-
     fun shouldNotify(alert: Alert): Boolean {
         if (!alert.isTerminal) return false
         if (alert.eventId == deliveredEventId || alert.eventId == pendingEventId) return false

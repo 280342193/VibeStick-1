@@ -74,6 +74,16 @@ class RecordingController:
         request = request or {}
         requested_source = str(request.get("audio_source") or request.get("source") or "")
         requested_session_id = _requested_session_id(request)
+        if self.session.active:
+            if requested_session_id and requested_session_id == self.session.session_id:
+                return self.session
+            return RecordingSession(
+                session_id=requested_session_id,
+                active=False,
+                stopped_at=datetime.now().isoformat(timespec="seconds"),
+                status="start_failed",
+                message="Another recording session is active",
+            )
         self.session = RecordingSession(
             session_id=requested_session_id or uuid.uuid4().hex,
             active=True,
@@ -131,11 +141,13 @@ class RecordingController:
             return self.session
         session_id = _clean_session_id(session_id)
         if session_id and self.session.session_id and session_id != self.session.session_id and self.session.active:
-            self.session.status = "audio_failed"
-            self.session.message = "Uploaded audio session did not match active recording"
-            show_hud("failed", hold_seconds=1.8)
-            self._save()
-            return self.session
+            return RecordingSession(
+                session_id=session_id,
+                active=False,
+                stopped_at=datetime.now().isoformat(timespec="seconds"),
+                status="audio_failed",
+                message="Uploaded audio session did not match active recording",
+            )
         if session_id and (not self.session.session_id or session_id != self.session.session_id):
             self.session = RecordingSession(
                 session_id=session_id,

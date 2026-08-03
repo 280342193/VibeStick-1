@@ -10,6 +10,18 @@ import org.junit.Test
 
 class ManualSendCoordinatorTest {
     @Test
+    fun directTextEndpointUsesOneRequest() = runTest {
+        val fake = FakeBridgeOperations(
+            directTextResult = RecordingResult.success(status = "sent"),
+        )
+
+        val result = SendCoordinator(fake).sendText("run tests")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("direct-text:run tests"), fake.calls)
+    }
+
+    @Test
     fun manualSendPastesThenPressesEnter() = runTest {
         val fake = FakeBridgeOperations()
 
@@ -29,6 +41,22 @@ class ManualSendCoordinatorTest {
         assertEquals(listOf("start", "upload", "stop:voice"), fake.calls)
         assertEquals(fake.startedSessionId, fake.uploadedSessionId)
         assertFalse(fake.enterCalled)
+    }
+
+    @Test
+    fun directVoiceEndpointUsesOneRequest() = runTest {
+        val fake = FakeBridgeOperations(
+            directVoiceResult = RecordingResult.success(
+                status = "pasted",
+                transcript = "run tests",
+            ),
+        )
+
+        val result = SendCoordinator(fake).sendVoice(byteArrayOf(1, 2))
+
+        assertTrue(result.isSuccess)
+        assertEquals("run tests", result.transcript)
+        assertEquals(listOf("direct-voice"), fake.calls)
     }
 
     @Test
@@ -148,6 +176,8 @@ class ManualSendCoordinatorTest {
 }
 
 private class FakeBridgeOperations(
+    private val directTextResult: RecordingResult? = null,
+    private val directVoiceResult: RecordingResult? = null,
     private val startResult: RecordingResult = RecordingResult.success(),
     private val uploadResult: RecordingResult = RecordingResult.success(),
     private val stopResult: RecordingResult = RecordingResult.success(),
@@ -160,6 +190,17 @@ private class FakeBridgeOperations(
     var startedSessionId = ""
     var uploadedSessionId = ""
     var enterResult = enterResult
+
+    override suspend fun sendTextDirect(text: String): RecordingResult? {
+        return directTextResult?.also { calls += "direct-text:$text" }
+    }
+
+    override suspend fun sendVoiceDirect(
+        sessionId: String,
+        pcm: ByteArray,
+    ): RecordingResult? {
+        return directVoiceResult?.also { calls += "direct-voice" }
+    }
 
     override suspend fun startRecording(sessionId: String): RecordingResult {
         calls += "start"

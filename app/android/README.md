@@ -43,6 +43,10 @@ VIBE_STICK_BRIDGE_TOKEN=你的共享Token
 在应用右上角的连接设置中填写同一个 Token。不要把 Token 或 ASR key 提交到
 Git。
 
+如果电脑没有配置共享 Token，Android 会生成并持久保存独立的设备 Token，通过
+局域网发现自动配对。Bridge 会同时保留 StickS3 和多台手机的 Token，设备之间不会
+互相覆盖。
+
 如果 Windows 防火墙没有自动放行，可在管理员 PowerShell 中添加专用网络入站
 规则：
 

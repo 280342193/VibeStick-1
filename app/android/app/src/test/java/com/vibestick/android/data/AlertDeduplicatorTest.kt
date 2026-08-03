@@ -26,17 +26,6 @@ class AlertDeduplicatorTest {
     }
 
     @Test
-    fun firstConnectionCanSeedCurrentAlertWithoutReplayingIt() {
-        val dedupe = AlertDeduplicator("done-1")
-        val current = Alert("done-2", AlertType.DONE, "already finished")
-
-        dedupe.seed(current)
-
-        assertFalse(dedupe.shouldNotify(current))
-        assertEquals("done-2", dedupe.deliveredEventId)
-    }
-
-    @Test
     fun failedDispatchCanRetrySameEvent() {
         val dedupe = AlertDeduplicator("")
         val alert = Alert("approval-1", AlertType.APPROVAL, "confirm")

@@ -6,6 +6,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.test.runTest
+import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,6 +72,61 @@ class BridgeHttpClientTest {
         assertEquals("16", connection.getRequestProperty("X-Vibe-Stick-Bits-Per-Sample"))
         assertEquals("shared-secret", connection.getRequestProperty("X-Vibe-Stick-Token"))
         assertArrayEquals(pcm, connection.requestBody.toByteArray())
+    }
+
+    @Test
+    fun voiceSendUsesSingleProtectedCompleteRequest() = runTest {
+        val connection = FakeHttpURLConnection(
+            responseCode = 200,
+            responseBody =
+                """{"recording":{"status":"pasted","transcript":"run tests"},"state":{}}""",
+        )
+        var requestedUrl: URL? = null
+        val client = BridgeHttpClient(candidate, token = "shared-secret") { url ->
+            requestedUrl = url
+            connection
+        }
+        val pcm = byteArrayOf(0, 1, 2, 3)
+
+        val result = client.completeRecording("session one", pcm)
+
+        assertTrue(result.isSuccess)
+        assertEquals("run tests", result.transcript)
+        assertEquals(
+            "/recording/complete?session_id=session%20one",
+            requestedUrl?.file,
+        )
+        assertEquals("POST", connection.requestMethod)
+        assertEquals("application/octet-stream", connection.getRequestProperty("Content-Type"))
+        assertEquals("shared-secret", connection.getRequestProperty("X-Vibe-Stick-Token"))
+        assertEquals("16000", connection.getRequestProperty("X-Vibe-Stick-Sample-Rate"))
+        assertEquals(630_000, connection.readTimeout)
+        assertArrayEquals(pcm, connection.requestBody.toByteArray())
+    }
+
+    @Test
+    fun textSendUsesSingleProtectedInputRequest() = runTest {
+        val connection = FakeHttpURLConnection(
+            responseCode = 200,
+            responseBody =
+                """{"input":{"status":"sent","message":"done","pasted":true,"submitted":true},"state":{}}""",
+        )
+        var requestedUrl: URL? = null
+        val client = BridgeHttpClient(candidate, token = "shared-secret") { url ->
+            requestedUrl = url
+            connection
+        }
+
+        val result = client.sendText("run tests")
+
+        assertTrue(result.isSuccess)
+        assertEquals("sent", result.status)
+        assertEquals("/input/text", requestedUrl?.file)
+        assertEquals("POST", connection.requestMethod)
+        assertEquals("shared-secret", connection.getRequestProperty("X-Vibe-Stick-Token"))
+        val body = JSONObject(connection.requestBody.toString(Charsets.UTF_8.name()))
+        assertEquals("run tests", body.getString("text"))
+        assertTrue(body.getBoolean("submit"))
     }
 
     @Test

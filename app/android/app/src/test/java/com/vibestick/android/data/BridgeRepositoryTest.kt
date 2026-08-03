@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BridgeRepositoryTest {
@@ -108,6 +109,49 @@ class BridgeRepositoryTest {
     }
 
     @Test
+    fun publicStateDoesNotHideProtectedRequestTokenFailure() = runTest {
+        val publicState = BridgeCallResult.Success(bridgeState("Desk"))
+        val unauthorized = BridgeCallResult.Failure(BridgeFailure.Http(401, "Unauthorized"))
+        val repository = BridgeRepository(
+            scanner = FakeBridgeScanner(emptyList()),
+            store = FakeConnectionStore(initialCandidate = desk, initialToken = "wrong"),
+            gatewayFactory = { _, _ ->
+                FakeBridgeGateway(
+                    stateResult = publicState,
+                    accessResult = unauthorized,
+                )
+            },
+        )
+
+        repository.selectBridge(desk)
+
+        assertEquals(ConnectionState.InvalidToken(desk), repository.connection.value)
+        assertNull(repository.bridgeState.value)
+    }
+
+    @Test
+    fun startupRefreshVerifiesProtectedAccessBeforeMarkingConnected() = runTest {
+        val publicState = BridgeCallResult.Success(bridgeState("Desk"))
+        val unauthorized = BridgeCallResult.Failure(BridgeFailure.Http(401, "Unauthorized"))
+        val repository = BridgeRepository(
+            scanner = FakeBridgeScanner(emptyList()),
+            store = FakeConnectionStore(initialCandidate = desk, initialToken = "wrong"),
+            gatewayFactory = { _, _ ->
+                FakeBridgeGateway(
+                    stateResult = publicState,
+                    accessResult = unauthorized,
+                )
+            },
+        )
+
+        val result = repository.refreshState()
+
+        assertEquals(unauthorized, result)
+        assertEquals(ConnectionState.InvalidToken(desk), repository.connection.value)
+        assertNull(repository.bridgeState.value)
+    }
+
+    @Test
     fun networkFailureMarksOfflineWithoutForgettingCandidate() = runTest {
         val store = FakeConnectionStore(initialCandidate = desk)
         val failure = BridgeFailure.Network("unreachable")
@@ -121,6 +165,32 @@ class BridgeRepositoryTest {
 
         assertEquals(ConnectionState.Offline(desk, failure), repository.connection.value)
         assertSame(desk, store.selectedBridge())
+    }
+
+    @Test
+    fun reconnectAfterNetworkFailureRechecksProtectedAccess() = runTest {
+        val gateway = FakeBridgeGateway(
+            stateResult = BridgeCallResult.Success(bridgeState("Desk")),
+        )
+        val repository = BridgeRepository(
+            scanner = FakeBridgeScanner(emptyList()),
+            store = FakeConnectionStore(initialCandidate = desk),
+            gatewayFactory = { _, _ -> gateway },
+        )
+        repository.selectBridge(desk)
+        gateway.stateResult = BridgeCallResult.Failure(BridgeFailure.Network("offline"))
+        repository.refreshState()
+        assertTrue(repository.connection.value is ConnectionState.Offline)
+        gateway.stateResult = BridgeCallResult.Success(bridgeState("Desk"))
+        val unauthorized = BridgeCallResult.Failure(
+            BridgeFailure.Http(401, "Unauthorized"),
+        )
+        gateway.accessResult = unauthorized
+
+        val result = repository.refreshState()
+
+        assertEquals(unauthorized, result)
+        assertEquals(ConnectionState.InvalidToken(desk), repository.connection.value)
     }
 
     @Test
@@ -340,10 +410,13 @@ private class FakeConnectionStore(
 }
 
 private class FakeBridgeGateway(
-    private val stateResult: BridgeCallResult<BridgeState>,
+    var stateResult: BridgeCallResult<BridgeState>,
     private val stopResult: RecordingResult = RecordingResult.success(),
+    var accessResult: BridgeCallResult<BridgeState> = stateResult,
 ) : BridgeGateway {
     override suspend fun getState(): BridgeCallResult<BridgeState> = stateResult
+
+    override suspend fun verifyAccess(): BridgeCallResult<BridgeState> = accessResult
 
     override suspend fun startRecording(sessionId: String): RecordingResult =
         RecordingResult.success()

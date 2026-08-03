@@ -204,7 +204,7 @@ Empty values in `.env` generally mean "use the built-in default". `scripts/dev.s
 - `VIBE_STICK_COMPUTER_NAME`: optional computer-name override shown on the StickS3 home screen.
 - `VIBE_STICK_PROVIDER`: active provider selection, `auto`, `codex`, or `claude`; default `auto`.
 - `VIBE_STICK_BRIDGE_TOKEN`: shared token required whenever the bridge binds outside loopback, such as `0.0.0.0`.
-- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`: max `/recording/audio` body size, default `2000000`.
+- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`: max `/recording/audio` or `/recording/complete` body size, default `2000000`.
 - `VIBE_STICK_RECORDING_USE_MAC_MIC`: set to `0` to disable Mac microphone fallback.
 - `VIBE_STICK_AUTO_ENTER`: set to `1` to press Return after pasting.
 

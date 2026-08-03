@@ -202,7 +202,7 @@ open -e .env
 - `VIBE_STICK_COMPUTER_NAME`：可选电脑名称覆盖值，会显示在 StickS3 首页。
 - `VIBE_STICK_PROVIDER`：当前 provider，`auto`、`codex` 或 `claude`；默认 `auto`。
 - `VIBE_STICK_BRIDGE_TOKEN`：bridge 绑定到非 loopback 地址时必需的共享 token，例如 `0.0.0.0`。
-- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`：`/recording/audio` 最大请求体大小，默认 `2000000`。
+- `VIBE_STICK_MAX_RECORDING_AUDIO_BYTES`：`/recording/audio` 或 `/recording/complete` 最大请求体大小，默认 `2000000`。
 - `VIBE_STICK_RECORDING_USE_MAC_MIC`：设为 `0` 可关闭 Mac 麦克风兜底。
 - `VIBE_STICK_AUTO_ENTER`：设为 `1` 会在粘贴后自动按 Return。
 

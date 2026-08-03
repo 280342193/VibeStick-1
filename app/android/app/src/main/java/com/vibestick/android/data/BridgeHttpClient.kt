@@ -26,6 +26,20 @@ class BridgeHttpClient(
         }
     }
 
+    suspend fun sendText(text: String): RecordingResult = withContext(Dispatchers.IO) {
+        when (
+            val response = execute(
+                method = "POST",
+                path = BridgeProtocol.textInputPath,
+                body = BridgeProtocol.textInputBody(text),
+                protected = true,
+            )
+        ) {
+            is BridgeCallResult.Success -> parseInputResult(response.value)
+            is BridgeCallResult.Failure -> RecordingResult.failure(response.failure)
+        }
+    }
+
     suspend fun startRecording(sessionId: String): RecordingResult = recordingRequest(
         path = BridgeProtocol.recordingStartPath,
         body = BridgeProtocol.startRecordingBody(sessionId),
@@ -39,6 +53,17 @@ class BridgeHttpClient(
         body = pcm,
         contentType = "application/octet-stream",
         audioHeaders = true,
+    )
+
+    suspend fun completeRecording(
+        sessionId: String,
+        pcm: ByteArray,
+    ): RecordingResult = recordingRequest(
+        path = BridgeProtocol.recordingCompletePath(sessionId),
+        body = pcm,
+        contentType = "application/octet-stream",
+        audioHeaders = true,
+        readTimeoutMillis = recordingStopReadTimeoutMillis,
     )
 
     suspend fun stopRecording(
@@ -196,6 +221,28 @@ class BridgeHttpClient(
                 status = status,
                 message = message,
                 transcript = transcript,
+            )
+        }
+    }
+
+    private fun parseInputResult(json: JSONObject): RecordingResult {
+        val input = json.optJSONObject("input")
+            ?: return RecordingResult.failure(
+                BridgeFailure.Protocol("Bridge response omitted input state"),
+            )
+        val status = input.optString("status")
+        val message = input.optString("message")
+        if (status.isBlank()) {
+            return RecordingResult.failure(
+                BridgeFailure.Protocol("Bridge response omitted input status"),
+            )
+        }
+        return if (status in setOf("sent", "pasted")) {
+            RecordingResult.success(status = status, message = message)
+        } else {
+            RecordingResult.failure(
+                BridgeFailure.Protocol(message.ifBlank { "Text input failed: $status" }),
+                status = status,
             )
         }
     }

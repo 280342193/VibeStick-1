@@ -2,6 +2,7 @@ package com.vibestick.android.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.security.SecureRandom
 
 interface BridgeConnectionStore {
     fun selectedBridge(): BridgeCandidate?
@@ -62,7 +63,19 @@ class ConnectionStore private constructor(
             .apply()
     }
 
-    override fun token(): String = preferences.getString(keyToken, "").orEmpty()
+    override fun token(): String {
+        preferences.getString(keyToken, "").orEmpty().trim()
+            .takeIf(String::isNotEmpty)
+            ?.let { return it }
+
+        return synchronized(preferences) {
+            preferences.getString(keyDeviceToken, "").orEmpty().trim()
+                .takeIf(String::isNotEmpty)
+                ?: generateDeviceToken().also { generated ->
+                    preferences.edit().putString(keyDeviceToken, generated).commit()
+                }
+        }
+    }
 
     override fun saveToken(token: String) {
         preferences.edit().putString(keyToken, token.trim()).apply()
@@ -89,7 +102,13 @@ class ConnectionStore private constructor(
         const val keyName = "bridge_name"
         const val keyVersion = "bridge_version"
         const val keyToken = "bridge_token"
+        const val keyDeviceToken = "device_token"
         const val keyLastAlertEventId = "last_alert_event_id"
         const val keyPendingEnterFingerprint = "pending_enter_fingerprint"
+
+        fun generateDeviceToken(): String {
+            val bytes = ByteArray(32).also(SecureRandom()::nextBytes)
+            return bytes.joinToString(separator = "") { byte -> "%02x".format(byte) }
+        }
     }
 }

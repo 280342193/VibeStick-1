@@ -11,6 +11,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 
 interface BridgeOperations {
+    suspend fun sendTextDirect(text: String): RecordingResult? = null
+
+    suspend fun sendVoiceDirect(
+        sessionId: String,
+        pcm: ByteArray,
+    ): RecordingResult? = null
+
     suspend fun startRecording(sessionId: String): RecordingResult
 
     suspend fun uploadPcm(
@@ -28,12 +35,32 @@ interface BridgeOperations {
 
 interface BridgeGateway : BridgeOperations {
     suspend fun getState(): BridgeCallResult<BridgeState>
+
+    suspend fun verifyAccess(): BridgeCallResult<BridgeState> = getState()
 }
 
 class HttpBridgeGateway(
     private val client: BridgeHttpClient,
 ) : BridgeGateway {
+    override suspend fun sendTextDirect(text: String): RecordingResult? {
+        val result = client.sendText(text)
+        val failure = result.failure
+        return if (failure is BridgeFailure.Http && failure.statusCode == 404) null else result
+    }
+
+    override suspend fun sendVoiceDirect(
+        sessionId: String,
+        pcm: ByteArray,
+    ): RecordingResult? {
+        val result = client.completeRecording(sessionId, pcm)
+        val failure = result.failure
+        return if (failure is BridgeFailure.Http && failure.statusCode == 404) null else result
+    }
+
     override suspend fun getState(): BridgeCallResult<BridgeState> = client.getState()
+
+    override suspend fun verifyAccess(): BridgeCallResult<BridgeState> =
+        client.postEvent(BridgeProtocol.authCheckEventBody())
 
     override suspend fun startRecording(sessionId: String): RecordingResult =
         client.startRecording(sessionId)
@@ -95,6 +122,8 @@ class SendCoordinator(
                 return@executeExclusive pressEnterForPastedText(text)
             }
 
+            operations.sendTextDirect(text)?.let { return@executeExclusive it }
+
             val started = operations.startRecording(sessionIdFactory())
             if (!started.isSuccess) return@executeExclusive started
 
@@ -121,6 +150,8 @@ class SendCoordinator(
                 )
             }
             val sessionId = sessionIdFactory()
+            operations.sendVoiceDirect(sessionId, pcm)?.let { return@executeExclusive it }
+
             val started = operations.startRecording(sessionId)
             if (!started.isSuccess) return@executeExclusive started
 
@@ -341,7 +372,7 @@ class BridgeRepository(
         val newGateway = gatewayFactory(candidate, store.token())
 
         return try {
-            when (val result = newGateway.getState()) {
+            when (val result = newGateway.verifyAccess()) {
                 is BridgeCallResult.Success -> {
                     val committed = synchronized(connectionLock) {
                         if (
@@ -401,11 +432,17 @@ class BridgeRepository(
                 revision = connectionRevision.get(),
                 candidate = candidate,
                 gateway = gateway ?: gatewayFactory(candidate, store.token()),
+                requiresAccessVerification = gateway == null,
             )
         }
         val candidate = attempt.candidate
         val activeGateway = attempt.gateway
-        return when (val result = activeGateway.getState()) {
+        val refreshResult = if (attempt.requiresAccessVerification) {
+            activeGateway.verifyAccess()
+        } else {
+            activeGateway.getState()
+        }
+        return when (val result = refreshResult) {
             is BridgeCallResult.Success -> {
                 val committed = synchronized(connectionLock) {
                     if (
@@ -510,9 +547,13 @@ class BridgeRepository(
     ) {
         when {
             failure is BridgeFailure.Http && failure.statusCode == 401 -> {
+                gateway = null
+                sendCoordinator = null
                 _connection.value = ConnectionState.InvalidToken(candidate)
             }
             failure is BridgeFailure.Network -> {
+                gateway = null
+                sendCoordinator = null
                 _connection.value = ConnectionState.Offline(candidate, failure)
             }
         }
@@ -538,6 +579,7 @@ private data class RefreshAttempt(
     val revision: Long,
     val candidate: BridgeCandidate,
     val gateway: BridgeGateway,
+    val requiresAccessVerification: Boolean,
 )
 
 private data class SendAttempt(
